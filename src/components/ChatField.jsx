@@ -336,7 +336,7 @@ const ChatField = ({ selectedUser, onBack, user }) => {
           paddingTop: "8px",
           marginBottom: "16px",
           flexGrow: 1,
-          overflowY: "auto",
+
           paddingRight: "8px",
           "&::-webkit-scrollbar": { width: "6px" },
           "&::-webkit-scrollbar-thumb": {
