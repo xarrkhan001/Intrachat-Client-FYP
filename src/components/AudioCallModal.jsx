@@ -37,13 +37,12 @@ const AudioCallModal = ({
 
   // Handle call actions
   const handleCallAction = () => {
-    // If the "Call End" button is clicked, close the modal immediately
     if (callStatus === "ongoing") {
-      onClose(); // Close the modal directly when the red button is clicked
+      onEndCall();
+      onClose(); // Close the modal immediately when the call ends
       return; // Exit here, no further action
     }
 
-    // Handle other call actions (Answer, Start, etc.)
     if (callStatus === "incoming") {
       setCallStatus("ringing");
       onAnswerCall();
@@ -160,6 +159,7 @@ const AudioCallModal = ({
           )}
         </Box>
       </DialogContent>
+      <DialogActions></DialogActions>
     </Dialog>
   );
 };

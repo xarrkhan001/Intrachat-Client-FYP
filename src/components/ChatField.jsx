@@ -117,27 +117,26 @@ const ChatField = ({ selectedUser, onBack, user }) => {
 
   const handleSendMessage = async (audioBlob, audioUrl) => {
     let newMessage = {};
+
+    // Handle Voice Message
     if (audioBlob) {
-      setIsSendingAudio(true);
       newMessage = {
         sender: "You",
         content: <audio controls src={audioUrl} style={{ width: "100%" }} />,
         audioUrl: audioUrl,
         createdAt: new Date(),
-        status: "loading",
+        status: "sent", // Mark as "sent" because it's static (no API call)
       };
-    } else if (file) {
-      newMessage = {
-        sender: "You",
-        content: `Sending file: ${file.name}`,
-        filePreview: filePreview,
-        fileType: file.type,
-        createdAt: new Date(),
-        status: "loading",
-      };
-      setFile(null); // reset file input
-      setShowPreview(false); // hide preview
-    } else if (message.trim()) {
+      // Directly add the voice message to the state
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        { ...newMessage, createdAt: new Date(), senderId: currentUser },
+      ]);
+      return; // Exit early, don't need API call for voice message
+    }
+
+    // Handling text and file messages (as usual)
+    if (message.trim()) {
       newMessage = {
         sender: "You",
         content: message,
@@ -145,10 +144,9 @@ const ChatField = ({ selectedUser, onBack, user }) => {
         status: "loading",
       };
       setMessage(""); // reset message input
-      simulateReceiveMessage();
     }
 
-    // Send new message and update state
+    // Send new message and update state via API (text or file message)
     try {
       const response = await axios.post("http://localhost:5000/api/messages", {
         ...newMessage,
@@ -162,7 +160,6 @@ const ChatField = ({ selectedUser, onBack, user }) => {
         { ...newMessage, createdAt: new Date(), senderId: currentUser },
       ]);
 
-      // Show a toast notification when you send a message
       toast.success(`You: ${newMessage.content}`, {
         position: "top-right",
         autoClose: 5000,

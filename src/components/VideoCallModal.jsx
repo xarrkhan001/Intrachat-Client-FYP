@@ -18,8 +18,11 @@ import {
   MicOff,
 } from "@mui/icons-material";
 import { AiOutlineUser } from "react-icons/ai"; // Default user icon
+import AgoraRTC from "agora-rtc-sdk-ng"; // Correct import for Agora
 
-const signalingServer = "ws://localhost:5000"; // Replace with your signaling server URL
+const appId = "af4a7e4a57d7491ca447fc9ec97e8899"; // Replace with your Agora App ID
+const channelName = "videoCall"; // Channel name for video call
+const token = null; // Token for the channel (can be null for testing, use token in production)
 
 const VideoCallModal = ({
   open,
@@ -33,148 +36,122 @@ const VideoCallModal = ({
   onAnswerCall,
   onRejectCall,
 }) => {
+  const client = useRef(null); // Agora client
+  const localVideoTrack = useRef(null); // Local video track
+  const remoteVideoTrack = useRef(null); // Remote video track
   const [callStatus, setCallStatus] = useState(
     isIncomingCall ? "incoming" : "calling"
   );
   const [isLocalVideoOn, setIsLocalVideoOn] = useState(true);
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false); // Remote video initially off
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(false); // Microphone mute state
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
-  const peerConnectionRef = useRef(null);
-  const socketRef = useRef(null);
 
   useEffect(() => {
-    socketRef.current = new WebSocket(signalingServer);
+    if (open) {
+      // Initialize Agora client when modal is open
+      client.current = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
 
-    socketRef.current.onopen = () => {
-      console.log("Connected to signaling server");
-    };
+      // Handle incoming call and events
+      client.current.on("user-published", handleUserPublished);
+      client.current.on("user-unpublished", handleUserUnpublished);
 
-    socketRef.current.onmessage = async (message) => {
-      const data = JSON.parse(message.data);
-      if (data.type === "offer") {
-        await handleOffer(data.offer);
-      } else if (data.type === "answer") {
-        await handleAnswer(data.answer);
-      } else if (data.type === "candidate") {
-        await handleNewICECandidate(data.candidate);
-      } else if (data.type === "call-rejected") {
-        onRejectCall(); // Handle rejection
+      // Start Agora call if not already started
+      if (!isCallAccepted) {
+        startAgora();
       }
-    };
 
-    startLocalStream();
+      return () => {
+        // Cleanup on component unmount
+        if (client.current) {
+          client.current.leave();
+          localVideoTrack.current.stop();
+          localVideoTrack.current.close();
+        }
+      };
+    }
+  }, [open, isCallAccepted]); // This ensures the Agora client starts only when the modal is open and call is not accepted
 
-    return () => {
-      socketRef.current.close();
-    };
-  }, []);
-
-  const startLocalStream = async () => {
+  const startAgora = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      setLocalStream(stream);
+      // Create local tracks (video and audio)
+      const [videoTrack, audioTrack] =
+        await AgoraRTC.createMicrophoneAndCameraTracks();
+      localVideoTrack.current = videoTrack;
+      // Display local stream in the local video container
+      videoTrack.play("local-stream"); // Ensure this id is the same as in the div
+
+      // Join the channel
+      await client.current.join(appId, channelName, token, null);
+
+      // Publish the local tracks to the Agora channel
+      await client.current.publish([videoTrack, audioTrack]);
+
+      setLocalStream(videoTrack); // Store the local video track
     } catch (error) {
-      console.error("Error accessing media devices.", error);
+      console.error("Error starting Agora:", error);
     }
   };
 
-  const handleOffer = async (offer) => {
-    peerConnectionRef.current = new RTCPeerConnection();
-    localStream.getTracks().forEach((track) => {
-      peerConnectionRef.current.addTrack(track, localStream);
-    });
-
-    await peerConnectionRef.current.setRemoteDescription(
-      new RTCSessionDescription(offer)
-    );
-
-    const answer = await peerConnectionRef.current.createAnswer();
-    await peerConnectionRef.current.setLocalDescription(answer);
-
-    socketRef.current.send(
-      JSON.stringify({
-        type: "answer",
-        answer: answer,
-      })
-    );
-
-    peerConnectionRef.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socketRef.current.send(
-          JSON.stringify({
-            type: "candidate",
-            candidate: event.candidate,
-          })
-        );
+  const handleUserPublished = (user, mediaType) => {
+    // Subscribe to the remote user's stream
+    client.current.subscribe(user, mediaType).then(() => {
+      if (mediaType === "video") {
+        remoteVideoTrack.current = user.videoTrack;
+        // Play the remote stream in the remote video container
+        remoteVideoTrack.current.play("remote-stream");
+        setRemoteStream(user.videoTrack); // Set the remote stream
+        setIsRemoteVideoOn(true); // Set remote video on
       }
-    };
-
-    peerConnectionRef.current.ontrack = (event) => {
-      setRemoteStream(event.streams[0]);
-      setIsRemoteVideoOn(true); // Turn on remote video once track is added
-    };
+    });
   };
 
-  const handleAnswer = async (answer) => {
-    await peerConnectionRef.current.setRemoteDescription(
-      new RTCSessionDescription(answer)
-    );
-  };
-
-  const handleNewICECandidate = (candidate) => {
-    const iceCandidate = new RTCIceCandidate(candidate);
-    peerConnectionRef.current.addIceCandidate(iceCandidate);
+  const handleUserUnpublished = (user) => {
+    // Stop playing remote video stream if the user leaves
+    remoteVideoTrack.current.stop();
+    remoteVideoTrack.current.close();
+    setIsRemoteVideoOn(false); // Set remote video off
   };
 
   const toggleLocalVideo = () => {
-    setIsLocalVideoOn(!isLocalVideoOn);
+    // Toggle the local video on/off
+    if (localVideoTrack.current) {
+      localVideoTrack.current.setEnabled(!isLocalVideoOn);
+      setIsLocalVideoOn(!isLocalVideoOn);
+    }
   };
 
   const handleMicToggle = () => {
-    setIsMuted(!isMuted);
-    localStream.getTracks().forEach((track) => {
-      if (track.kind === "audio") {
-        track.enabled = !track.enabled;
-      }
-    });
-  };
-
-  const handleCallAction = () => {
-    if (callStatus === "calling") {
-      setCallStatus("ringing");
-      if (onStartCall) onStartCall(); // Ensure function is passed correctly
-    } else {
-      setCallStatus("ended");
-      if (onEndCall) onEndCall(); // Ensure function is passed correctly
-      onClose();
+    // Toggle the microphone mute/unmute
+    if (localStream) {
+      localStream.getTracks().forEach((track) => {
+        if (track.kind === "audio") {
+          track.enabled = !isMuted;
+          setIsMuted(!isMuted);
+        }
+      });
     }
   };
 
   const handleEndCall = () => {
-    peerConnectionRef.current.close();
-    if (onEndCall) onEndCall(); // Ensure function is passed correctly
+    // Leave the call and clean up
+    client.current.leave();
+    localVideoTrack.current.stop();
+    localVideoTrack.current.close();
     onClose();
   };
 
   const handleRejectCall = () => {
-    socketRef.current.send(
-      JSON.stringify({
-        type: "call-rejected",
-      })
-    );
-    if (onRejectCall) onRejectCall(); // Ensure function is passed correctly
+    // Handle rejecting the call
+    if (onRejectCall) onRejectCall();
     onClose();
   };
 
   const handleIncomingCallAction = (action) => {
     if (action === "accept") {
       setCallStatus("ongoing");
-      if (onAnswerCall) onAnswerCall(); // Ensure function is passed correctly
+      if (onAnswerCall) onAnswerCall();
     } else {
       handleRejectCall();
     }
@@ -190,7 +167,7 @@ const VideoCallModal = ({
           alignItems="center"
           justifyContent="center"
         >
-          {/* Video streams */}
+          {/* Local and remote video streams */}
           <Box
             display="flex"
             justifyContent="center"
@@ -207,15 +184,10 @@ const VideoCallModal = ({
               }}
             >
               {isRemoteVideoOn ? (
-                <video
-                  autoPlay
-                  ref={(video) => {
-                    if (video && remoteStream) {
-                      video.srcObject = remoteStream;
-                    }
-                  }}
+                <div
+                  id="remote-stream"
                   style={{ width: "100%", height: "100%" }}
-                />
+                ></div>
               ) : (
                 <Avatar
                   sx={{
@@ -241,16 +213,10 @@ const VideoCallModal = ({
               }}
             >
               {isLocalVideoOn ? (
-                <video
-                  autoPlay
-                  muted
-                  ref={(video) => {
-                    if (video && localStream) {
-                      video.srcObject = localStream;
-                    }
-                  }}
+                <div
+                  id="local-stream"
                   style={{ width: "100%", height: "100%" }}
-                />
+                ></div>
               ) : (
                 <Avatar
                   sx={{
@@ -314,20 +280,7 @@ const VideoCallModal = ({
             </IconButton>
           </Box>
 
-          {/* Start / End call button */}
-          {callStatus === "calling" && (
-            <Box mt={2} display="flex" justifyContent="center">
-              <Button
-                variant="contained"
-                color="success"
-                onClick={handleCallAction}
-              >
-                Start Call
-              </Button>
-            </Box>
-          )}
-
-          {/* Incoming call buttons (answer / reject) */}
+          {/* Incoming call buttons (accept/reject) */}
           {callStatus === "incoming" && (
             <Box mt={2} display="flex" justifyContent="center">
               <Button

@@ -97,8 +97,8 @@ const SignUpLogin = () => {
         const token = response.data.token;
 
         const userId = response.data.user._id;
-            localStorage.setItem("authToken", token);
-            localStorage.setItem("userId", userId);
+        localStorage.setItem("authToken", token);
+        localStorage.setItem("userId", userId);
         // localStorage.setItem("authToken", token);
         // localStorage.setItem("userId", userId);
         toast.success("Account created successfully!", {
@@ -122,11 +122,11 @@ const SignUpLogin = () => {
 
         const token = response.data.token;
 
-    const userId = response.data.user._id;
+        const userId = response.data.user._id;
         localStorage.setItem("authToken", token);
         localStorage.setItem("userId", userId);
 
-        console.log("login",userId)
+        console.log("login", userId);
 
         toast.success("Login successful!", {
           position: "top-right",
